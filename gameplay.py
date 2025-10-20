@@ -7,14 +7,16 @@ class Worker:
         self.worker_id = worker_id  # 0 or 1 for each player
         self.x = x
         self.y = y
+        self.previous_height = 0  # For god power effects like Pan
 
 class AIPlayer:
-    def __init__(self, player_id, depth=3):
+    def __init__(self, player_id, depth=3, god_manager=None):
         self.player_id = player_id
         self.depth = depth
+        self.god_manager = god_manager
     
     def evaluate(self, game):
-        """Heuristic evaluation function"""
+        """Heuristic evaluation function with god power considerations"""
         my_workers = [w for w in game.workers if w.owner == self.player_id]
         opp_workers = [w for w in game.workers if w.owner != self.player_id]
         
@@ -32,7 +34,7 @@ class AIPlayer:
             elif height == 1:
                 score += 10    # Good position
             
-            # Mobility bonus
+            # Mobility bonus (considering god powers)
             moves = len(game.possible_moves(w))
             score += moves * 2
         
@@ -52,17 +54,36 @@ class AIPlayer:
             moves = len(game.possible_moves(w))
             score -= moves * 2
         
-        return score + random.randint(-3, 3)  # Add randomness
+        # God power specific evaluation
+        if self.god_manager:
+            my_god = self.god_manager.get_god_for_player(self.player_id)
+            if my_god:
+                # Add god-specific bonuses
+                if my_god.name == "Atlas":
+                    score += 20  # Dome building advantage
+                elif my_god.name == "Pan":
+                    score += 15  # Drop-down win condition
+                elif my_god.name == "Artemis":
+                    score += 25  # Double movement advantage
+        
+        return score + random.randint(-3, 3)
     
     def minimax(self, game, depth, maximizing):
-        """Minimax algorithm with alpha-beta pruning concept"""
-        # Check for immediate win/loss
+        """Minimax algorithm with god power integration"""
+        # Check for immediate win/loss (including god power wins)
         for w in game.workers:
             if game.has_won(w):
                 if w.owner == self.player_id:
                     return 10000, None  # AI wins
                 else:
                     return -10000, None  # Human wins
+            
+            # Check god power special wins
+            if self.god_manager and self.god_manager.check_special_win(game, w):
+                if w.owner == self.player_id:
+                    return 10000, None
+                else:
+                    return -10000, None
         
         # Check for losing position (no moves available)
         if game.is_losing_position(game.turn):
@@ -121,7 +142,7 @@ class AIPlayer:
         return action
 
 class Santorini:
-    def __init__(self):
+    def __init__(self, god_manager=None):  # FIXED - Added god_manager parameter
         # Game board (5x5 grid, heights 0-4)
         self.board = [[0 for _ in range(5)] for _ in range(5)]
         
@@ -142,8 +163,11 @@ class Santorini:
         self.winner = None
         self.placed_workers = 0
         
-        # AI player
-        self.ai = AIPlayer(player_id=1, depth=3)
+        # God power integration
+        self.god_manager = god_manager
+        
+        # AI player (with god manager)
+        self.ai = AIPlayer(player_id=1, depth=3, god_manager=god_manager)
     
     def place_worker_at(self, worker_index, col, row):
         """Place a worker at the specified position during placement phase"""
@@ -182,7 +206,7 @@ class Santorini:
         return None
     
     def possible_moves(self, worker):
-        """Get all valid move positions for a worker"""
+        """Get all valid move positions for a worker (with god power integration)"""
         if worker.x is None or worker.y is None:
             return []
         
@@ -215,12 +239,24 @@ class Santorini:
                 if new_height >= 4:
                     continue
                 
+                # Check god power restrictions (e.g., Athena blocking upward movement)
+                if self.god_manager:
+                    opponent_god = self.god_manager.get_god_for_player(1 - worker.owner)
+                    if opponent_god and opponent_god.name == "Athena":
+                        if hasattr(opponent_god, 'opponent_cant_move_up') and opponent_god.opponent_cant_move_up:
+                            if new_height > current_height:
+                                continue
+                
+                # Check if god power allows this move
+                if self.god_manager and not self.god_manager.can_move(self, worker, (new_x, new_y)):
+                    continue
+                
                 moves.append((new_x, new_y))
         
         return moves
     
     def possible_builds(self, worker):
-        """Get all valid build positions for a worker"""
+        """Get all valid build positions for a worker (with god power integration)"""
         if worker.x is None or worker.y is None:
             return []
         
@@ -247,12 +283,16 @@ class Santorini:
                 if self.board[new_y][new_x] >= 4:
                     continue
                 
+                # Check if god power allows this build
+                if self.god_manager and not self.god_manager.can_build(self, worker, (new_x, new_y)):
+                    continue
+                
                 builds.append((new_x, new_y))
         
         return builds
     
     def has_won(self, worker):
-        """Check if a worker has won by reaching height 3"""
+        """Check if a worker has won by reaching height 3 (normal win condition)"""
         if worker.x is None or worker.y is None:
             return False
         return self.board[worker.y][worker.x] == 3
@@ -268,7 +308,7 @@ class Santorini:
     
     def clone(self):
         """Create a deep copy of the current game state"""
-        new_game = Santorini()
+        new_game = Santorini(self.god_manager)
         new_game.board = copy.deepcopy(self.board)
         new_game.occupants = [[None for _ in range(5)] for _ in range(5)]
         new_game.workers = []
@@ -276,6 +316,7 @@ class Santorini:
         # Copy workers and update occupants
         for worker in self.workers:
             new_worker = Worker(worker.owner, worker.worker_id, worker.x, worker.y)
+            new_worker.previous_height = getattr(worker, 'previous_height', 0)
             new_game.workers.append(new_worker)
             if worker.x is not None and worker.y is not None:
                 new_game.occupants[worker.y][worker.x] = new_worker
@@ -290,7 +331,7 @@ class Santorini:
         return new_game
     
     def all_actions(self, player):
-        """Generate all possible actions for a player"""
+        """Generate all possible actions for a player (with god power integration)"""
         actions = []
         my_workers = self.get_player_workers(player)
         
@@ -313,17 +354,25 @@ class Santorini:
         return actions
     
     def do_action(self, worker_id, move, build):
-        """Execute an action: move worker, then build"""
+        """Execute an action: move worker, then build (with god power integration)"""
         my_workers = self.get_player_workers(self.turn)
         worker = next(w for w in my_workers if w.worker_id == worker_id)
+        
+        # Store old position for god power effects
+        old_pos = (worker.x, worker.y)
+        worker.previous_height = self.board[worker.y][worker.x]
         
         # Move worker
         self.occupants[worker.y][worker.x] = None
         worker.x, worker.y = move
         self.occupants[worker.y][worker.x] = worker
         
-        # Check for win after move
-        if self.has_won(worker):
+        # Trigger god power on_move
+        if self.god_manager:
+            self.god_manager.on_move(self, worker, old_pos, move)
+        
+        # Check for win after move (normal + god power wins)
+        if self.has_won(worker) or (self.god_manager and self.god_manager.check_special_win(self, worker)):
             self.game_over = True
             self.winner = worker.owner
             return
@@ -331,9 +380,13 @@ class Santorini:
         # Build
         build_x, build_y = build
         self.board[build_y][build_x] += 1
+        
+        # Trigger god power on_build
+        if self.god_manager:
+            self.god_manager.on_build(self, worker, build)
     
     def ai_get_best_move(self):
-        """AI decision making using minimax"""
+        """AI decision making using minimax with god powers"""
         if self.phase == 'placement':
             return self.ai_placement_move()
         else:
@@ -362,7 +415,7 @@ class Santorini:
         return random.choice(available_cells)
     
     def ai_play_move(self):
-        """AI play phase using minimax"""
+        """AI play phase using minimax with god powers"""
         action = self.ai.choose_action(self)
         if not action:
             return None
@@ -376,7 +429,12 @@ class Santorini:
         return (worker, move, build)
     
     def execute_move(self, worker, move_pos, build_pos=None):
-        """Execute a move (used by both human and AI)"""
+        """Execute a move (used by both human and AI) with god power integration"""
+        # Store old position for god power effects
+        old_pos = (worker.x, worker.y) if worker.x is not None else None
+        if old_pos:
+            worker.previous_height = self.board[old_pos[1]][old_pos[0]]
+        
         # Clear old position
         if worker.x is not None:
             self.occupants[worker.y][worker.x] = None
@@ -385,8 +443,12 @@ class Santorini:
         worker.x, worker.y = move_pos
         self.occupants[move_pos[1]][move_pos[0]] = worker
         
-        # Check for win after move
-        if self.has_won(worker):
+        # Trigger god power on_move
+        if self.god_manager and old_pos:
+            self.god_manager.on_move(self, worker, old_pos, move_pos)
+        
+        # Check for win after move (normal + god power wins)
+        if self.has_won(worker) or (self.god_manager and self.god_manager.check_special_win(self, worker)):
             self.game_over = True
             self.winner = worker.owner
             return True
@@ -394,6 +456,10 @@ class Santorini:
         # If build position provided, execute build
         if build_pos is not None:
             self.board[build_pos[1]][build_pos[0]] += 1
+            
+            # Trigger god power on_build
+            if self.god_manager:
+                self.god_manager.on_build(self, worker, build_pos)
             
             # Switch turns only if game hasn't ended
             if not self.game_over:
