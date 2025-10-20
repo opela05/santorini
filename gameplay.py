@@ -322,6 +322,12 @@ class Santorini:
         worker.x, worker.y = move
         self.occupants[worker.y][worker.x] = worker
         
+        # Check for win after move
+        if self.has_won(worker):
+            self.game_over = True
+            self.winner = worker.owner
+            return
+        
         # Build
         build_x, build_y = build
         self.board[build_y][build_x] += 1
@@ -379,7 +385,7 @@ class Santorini:
         worker.x, worker.y = move_pos
         self.occupants[move_pos[1]][move_pos[0]] = worker
         
-        # Check for win
+        # Check for win after move
         if self.has_won(worker):
             self.game_over = True
             self.winner = worker.owner
@@ -389,8 +395,9 @@ class Santorini:
         if build_pos is not None:
             self.board[build_pos[1]][build_pos[0]] += 1
             
-            # Switch turns
-            self.turn = 1 - self.turn
-            self.is_ai_turn = (self.turn == 1)
+            # Switch turns only if game hasn't ended
+            if not self.game_over:
+                self.turn = 1 - self.turn
+                self.is_ai_turn = (self.turn == 1)
         
         return False  # Game continues

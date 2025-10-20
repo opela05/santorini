@@ -1,3 +1,4 @@
+#worker.py
 import arcade
 
 class WorkerView:
